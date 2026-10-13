@@ -69,7 +69,7 @@ The deployed application was verified through:
 ### Application Screenshots
 
 **Application running in the browser**
-
+https://github.com/sakthishak/aws-3tier-production-infrastructure/blob/main/screenshots/01-terraform-apply.png?raw=true
 **HTTP response verification**
 
 ![Application HTTP Response](screenshots/03-application-curl-success.png)
