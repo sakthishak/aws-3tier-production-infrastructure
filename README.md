@@ -1,331 +1,118 @@
-# AWS 3-Tier Production Infrastructure
+# AWS 3-Tier Production Infrastructure | Terraform
 
-Production-style AWS infrastructure built using **Terraform**, with a focus on network design, security boundaries, Infrastructure as Code, validation, troubleshooting, and engineering decisions.
+Designed and deployed AWS infrastructure using Terraform, implementing network segmentation, security-group boundaries, private application hosting, and an Application Load Balancer.
 
-The project is being built incrementally, with documentation updated alongside each implementation step.
+**Tech Stack:** AWS · Terraform · VPC · EC2 · Application Load Balancer · IAM · Security Groups · S3 Gateway Endpoint
 
----
-
-## Project Objective
-
-Build a production-style 3-tier AWS infrastructure where:
+## Architecture
 
 ```text
-Internet
-   |
-   v
-Application Load Balancer
-   |
-   v
-Private Application Tier
-   |
-   v
-Private Database Tier
+                         Internet
+                            |
+                            v
+                  Application Load Balancer
+                       Public Subnets
+                            |
+                      HTTP : 80
+                            |
+                            v
+                   Private Application Tier
+                     EC2 | Port 8080
+                            |
+                            v
+                    Private Database Tier
+                   Subnets & Security Group
 ```
 
-The infrastructure is designed to demonstrate practical AWS and DevOps concepts rather than simply creating individual AWS resources.
+**AWS Region:** `us-east-1`
+**Availability Zones:** `us-east-1a`, `us-east-1b`
 
----
-
-## Current Architecture
-
-The project uses:
-
-* One Amazon Virtual Private Cloud (VPC)
-* Two Availability Zones
-* Public subnets
-* Private application subnets
-* Private database subnets
-* Internet Gateway
-* Separate route tables for each tier
-* S3 Gateway VPC Endpoint
-* Separate security groups for each tier
-* Terraform for Infrastructure as Code
-
-### Network Layout
-
-```text
-                    VPC
-                10.0.0.0/16
-                     |
-          +----------+----------+
-          |                     |
-      us-east-1a            us-east-1b
-          |                     |
-     +----+----+            +----+----+
-     |         |            |         |
-   Public     App         Public      App
-  10.0.1.0   10.0.11.0   10.0.2.0   10.0.12.0
-     |         |            |         |
-     +---------+------------+---------+
-               |
-          Database Tier
-        10.0.21.0 / 24
-        10.0.22.0 / 24
-```
-
-The detailed architecture is documented in:
-
-**[Architecture](Architecture/architecture.md)**
-
----
-
-## Current Implementation
+## Implementation Highlights
 
 ### Networking
 
-Implemented and verified:
-
-* VPC — `10.0.0.0/16`
-* Two Availability Zones
-* 2 public subnets
-* 2 private application subnets
-* 2 private database subnets
-* Internet Gateway
-* Public route table
-* Private application route table
-* Private database route table
-* S3 Gateway VPC Endpoint
-
-Detailed networking documentation:
-
-**[Networking Infrastructure](Infrastructure/networking.md)**
-
----
+* Created a Virtual Private Cloud (VPC) with CIDR `10.0.0.0/16`.
+* Designed six subnets across two Availability Zones: two public, two private application, and two private database subnets.
+* Configured an Internet Gateway, separate route tables, and subnet associations.
+* Implemented an S3 Gateway VPC Endpoint for private connectivity to Amazon S3 without requiring a NAT Gateway for that traffic.
 
 ### Security
 
-Three security groups have been implemented:
+* Configured separate security groups for the load balancer, application, and database tiers.
+* Restricted application traffic to port `8080` from the load balancer security group.
+* Restricted database traffic to port `5432` from the application security group.
+* Deployed the application EC2 instance in a private subnet without a public IP address.
+* Configured an IAM role with AWS Systems Manager permissions for instance management.
 
-```text
-Internet
-   |
-   | TCP 80
-   v
-ALB Security Group
-   |
-   | TCP 8080
-   v
-Application Security Group
-   |
-   | TCP 5432
-   v
-Database Security Group
-```
+### Application Deployment
 
-Detailed security documentation:
+* Deployed an EC2 application server running a Python HTTP application.
+* Configured an Application Load Balancer to receive HTTP traffic on port `80` and forward requests to the application on port `8080`.
+* Implemented a `/health` endpoint for application health checks.
+* Verified successful HTTP responses and healthy target status.
 
-**[Security Groups](Infrastructure/security-groups.md)**
+### Infrastructure as Code
 
----
+* Provisioned AWS resources using Terraform.
+* Organized configurations into separate files for networking, subnets, routing, security groups, and compute resources.
+* Used `terraform fmt`, `terraform validate`, and `terraform plan` to format and validate infrastructure changes.
 
-### Terraform
+## Verification
 
-Infrastructure is managed using Terraform.
+The deployed application was verified through:
 
-Current environment:
+* Successful HTTP response from the application.
+* Successful access through the Application Load Balancer.
+* Healthy application target status.
+* Terraform configuration validation and plan review.
 
-```text
-Terraform:       1.14.8
-AWS Provider:    6.66.0
-AWS Region:      us-east-1
-```
+### Application Screenshots
 
-Terraform configuration is organized under:
+**Application running in the browser**
 
-```text
-terraform/
-```
+![Application Browser](screenshots/02-application-browser.png)
 
-Detailed Terraform documentation:
+**HTTP response verification**
 
-**[Terraform Infrastructure](Infrastructure/terraform.md)**
+![Application HTTP Response](screenshots/03-application-curl-success.png)
 
----
+**Load balancer target health**
+
+![ALB Target Health](screenshots/04-alb-target-health.png)
 
 ## Engineering Decisions
 
-This project documents the reasoning behind infrastructure choices rather than only documenting the final configuration.
+* **Application Load Balancer:** Selected for HTTP application traffic routing and health checks.
+* **Private application hosting:** Kept the application instance out of direct public internet access.
+* **Security-group references:** Used tier-specific rules to restrict traffic between components.
+* **S3 Gateway Endpoint:** Enabled private S3 connectivity without adding a NAT Gateway solely for S3 access.
 
-### Application Load Balancer vs Network Load Balancer
+## Project Scope
 
-The target application is an HTTP/HTTPS web application, so an Application Load Balancer is being used as the load-balancing design.
-
-**[Read the ALB vs NLB decision](Engineering-Decisions/alb-vs-nlb.md)**
-
-Additional engineering decisions will be documented here as the project develops.
-
----
+The database tier includes private subnets and a database security group. A database instance has not been deployed.
 
 ## Repository Structure
 
 ```text
 aws-3tier-production-infrastructure/
-│
-├── README.md
-│
 ├── Architecture/
-│   └── architecture.md
-│
-├── Infrastructure/
-│   ├── terraform.md
-│   ├── networking.md
-│   └── security-groups.md
-│
 ├── Engineering-Decisions/
-│   └── alb-vs-nlb.md
-│
-├── Operations/
-│
-├── Troubleshooting/
-│
+├── Infrastructure/
 ├── screenshots/
-│
-├── scripts/
-│
 └── terraform/
-    ├── versions.tf
-    ├── provider.tf
-    ├── variables.tf
-    ├── vpc.tf
-    ├── availability-zones.tf
-    ├── subnets.tf
-    ├── internet_gateway.tf
-    ├── public-route-table.tf
-    ├── private-app-route-table.tf
-    ├── private-db-route-table.tf
-    ├── s3-vpc-endpoint.tf
-    ├── security-groups.tf
-    ├── ec2.tf
-    └── outputs.tf
 ```
+
+## Tools
+
+* **Cloud:** Amazon Web Services (AWS)
+* **Infrastructure as Code:** Terraform
+* **Compute:** Amazon EC2
+* **Networking:** Amazon VPC, subnets, route tables, Internet Gateway
+* **Load Balancing:** Application Load Balancer
+* **Security:** IAM, security groups, AWS Systems Manager
+* **Version Control:** Git and GitHub
 
 ---
 
-## Terraform Workflow
-
-Infrastructure changes follow this workflow:
-
-```text
-Edit Terraform
-      |
-      v
-terraform fmt
-      |
-      v
-terraform validate
-      |
-      v
-terraform plan
-      |
-      v
-Review changes
-      |
-      v
-terraform apply
-      |
-      v
-Verify infrastructure
-      |
-      v
-terraform plan
-```
-
-Terraform state files and generated directories are excluded from Git.
-
----
-
-## Validation
-
-The current infrastructure has been validated using Terraform.
-
-```bash
-terraform validate
-terraform plan
-```
-
-Current plan result:
-
-```text
-No changes. Your infrastructure matches the configuration.
-```
-
-This confirms that the deployed resources currently match the Terraform configuration.
-
----
-
-## Cost Awareness
-
-The project is being developed with AWS cost awareness.
-
-For example, a NAT Gateway was not created during the initial networking implementation because the current application requirements do not require general outbound Internet access from the private application subnets.
-
-An S3 Gateway VPC Endpoint is used for private S3 connectivity instead.
-
-Infrastructure decisions are therefore evaluated based on:
-
-```text
-Requirement
-    +
-Security
-    +
-Architecture
-    +
-Cost
-    +
-Operational simplicity
-```
-
----
-
-## Documentation Approach
-
-This repository documents the project as it is actually built.
-
-The documentation focuses on:
-
-```text
-Requirement
-    ↓
-Architecture
-    ↓
-Engineering Decision
-    ↓
-Terraform Implementation
-    ↓
-Deployment
-    ↓
-Validation
-    ↓
-Troubleshooting
-    ↓
-Lessons Learned
-```
-
-Documentation is updated as each part of the infrastructure is implemented and verified.
-
----
-
-## Project Status
-
-### Completed
-
-* Terraform project foundation
-* AWS provider configuration
-* VPC
-* Availability Zones
-* Public subnets
-* Private application subnets
-* Private database subnets
-* Internet Gateway
-* Public route table
-* Private application route table
-* Private database route table
-* S3 Gateway VPC Endpoint
-* ALB security group
-* Application security group
-* Database security group
-* Terraform validation and plan verification
-* Project documentation structure
-
-The repository represents the infrastructure that has actually been implemented and verified at each stage.
+**Author:** [Sakthisha K.](https://github.com/sakthishak)
+**Repository:** [aws-3tier-production-infrastructure](https://github.com/sakthishak/aws-3tier-production-infrastructure)
