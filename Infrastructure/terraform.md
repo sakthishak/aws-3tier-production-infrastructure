@@ -2,393 +2,181 @@
 
 ## Overview
 
-Terraform is used to define and provision the AWS infrastructure for this project.
+Terraform defines the AWS infrastructure for this project as code. It allows infrastructure changes to be reviewed, validated, version-controlled, and reproduced.
 
-The infrastructure is defined as code so that the environment can be:
+All Terraform configuration files are stored in the `terraform/` directory.
 
-* Reproduced
-* Reviewed
-* Version controlled
-* Validated before deployment
-* Updated consistently
+## Tools and Configuration
 
-The Terraform configuration is stored separately from the documentation:
+| Item                    | Configuration   |
+| ----------------------- | --------------- |
+| Infrastructure as Code  | Terraform       |
+| AWS provider            | `hashicorp/aws` |
+| AWS region              | `us-east-1`     |
+| Terraform version used  | 1.14.8          |
+| AWS provider constraint | `~> 6.0`        |
 
-```text
-terraform/
-```
+Terraform and provider version constraints are defined in `versions.tf`. The AWS provider configuration is defined in `provider.tf`.
 
----
-
-## Terraform Version
-
-Current Terraform version:
-
-```text
-Terraform v1.14.8
-```
-
-The project requires Terraform versions:
-
-```text
->= 1.14.0
-< 2.0.0
-```
-
-This constraint is defined in:
-
-```text
-terraform/versions.tf
-```
-
-### Why version constraints are used
-
-Terraform version constraints help prevent the project from being executed with an unsupported major version.
-
-The project currently allows compatible Terraform 1.x versions while preventing an automatic move to Terraform 2.x.
-
----
-
-## AWS Provider
-
-The project uses the official HashiCorp Amazon Web Services provider.
-
-Provider source:
-
-```text
-hashicorp/aws
-```
-
-The project uses the provider constraint:
-
-```text
-~> 6.0
-```
-
-The provider is configured to deploy resources in:
-
-```text
-us-east-1
-```
-
-The configuration is separated into:
-
-```text
-versions.tf
-provider.tf
-variables.tf
-```
-
-This keeps version management, provider configuration, and project variables easier to understand.
-
----
-
-## Terraform File Organization
-
-The Terraform configuration is divided by infrastructure responsibility.
+## Repository Structure
 
 ```text
 terraform/
-│
 ├── versions.tf
 ├── provider.tf
 ├── variables.tf
-│
 ├── vpc.tf
 ├── availability-zones.tf
 ├── subnets.tf
 ├── internet_gateway.tf
-│
 ├── public-route-table.tf
 ├── private-app-route-table.tf
 ├── private-db-route-table.tf
-│
 ├── s3-vpc-endpoint.tf
 ├── security-groups.tf
-│
 ├── ec2.tf
-└── outputs.tf
+├── alb.tf
+├── target-group.tf
+├── listener.tf
+├── target-group-attachment.tf
+├── outputs.tf
+├── .terraform.lock.hcl
+└── .gitignore
 ```
 
-The configuration is separated into multiple files for readability.
+Each Terraform file groups related configuration by responsibility. Terraform loads the `.tf` files in the same directory as a single configuration.
 
-Terraform loads all `.tf` files in the same directory as one configuration, so the files do not need to be combined into one large file.
+## Infrastructure Components
 
----
+| Component                    | Purpose                                                               |
+| ---------------------------- | --------------------------------------------------------------------- |
+| `vpc.tf`                     | Defines the Virtual Private Cloud (VPC).                              |
+| `availability-zones.tf`      | Retrieves available Availability Zones.                               |
+| `subnets.tf`                 | Defines public, application, and database subnets.                    |
+| `internet_gateway.tf`        | Defines the Internet Gateway.                                         |
+| `public-route-table.tf`      | Defines public subnet routing.                                        |
+| `private-app-route-table.tf` | Defines application subnet routing.                                   |
+| `private-db-route-table.tf`  | Defines database subnet routing.                                      |
+| `s3-vpc-endpoint.tf`         | Provides private routing to Amazon S3 through a Gateway VPC Endpoint. |
+| `security-groups.tf`         | Defines security groups for the ALB, application, and database tiers. |
+| `ec2.tf`                     | Defines the private application EC2 instance.                         |
+| `alb.tf`                     | Defines the Application Load Balancer.                                |
+| `target-group.tf`            | Defines the application target group and health check.                |
+| `listener.tf`                | Defines the ALB listener.                                             |
+| `target-group-attachment.tf` | Registers the application instance with the target group.             |
+| `outputs.tf`                 | Defines any Terraform outputs.                                        |
+| `variables.tf`               | Defines input variables.                                              |
+| `versions.tf`                | Defines Terraform and provider requirements.                          |
+| `provider.tf`                | Configures the AWS provider.                                          |
 
-## Terraform Configuration Flow
+## Terraform Workflow
 
-The infrastructure follows a logical dependency chain:
+Use the following workflow when changing the infrastructure.
 
-```text
-Terraform Configuration
-        |
-        v
-AWS Provider
-        |
-        v
-VPC
-        |
-        v
-Availability Zones
-        |
-        v
-Subnets
-        |
-        v
-Internet Gateway
-        |
-        v
-Route Tables
-        |
-        v
-VPC Endpoint
-        |
-        v
-Security Groups
-```
-
-Terraform determines the dependency order automatically from resource references.
-
-For example, the subnet configuration references the VPC:
-
-```text
-aws_vpc.main.id
-```
-
-Therefore Terraform knows that the VPC must exist before the subnet can be created.
-
----
-
-## Terraform Initialization
-
-The project is initialized with:
+### 1. Initialize
 
 ```bash
 terraform init
 ```
 
-Initialization downloads the required provider and prepares the working directory.
+Initializes the working directory and downloads the required provider plugins.
 
-The provider dependency is recorded in:
-
-```text
-.terraform.lock.hcl
-```
-
-The lock file helps maintain consistent provider versions across Terraform runs.
-
----
-
-## Terraform Formatting
-
-Terraform configuration is formatted using:
+### 2. Format
 
 ```bash
 terraform fmt
 ```
 
-This applies Terraform's standard formatting conventions.
+Formats Terraform files consistently.
 
-Formatting is useful because it keeps the configuration consistent and easier to review.
-
----
-
-## Terraform Validation
-
-The configuration is validated using:
+### 3. Validate
 
 ```bash
 terraform validate
 ```
 
-This checks whether the Terraform configuration is syntactically and structurally valid.
+Checks whether the configuration is syntactically and structurally valid. It does not deploy resources.
 
-Validation does not create AWS resources.
-
----
-
-## Terraform Plan
-
-Before applying infrastructure changes, the configuration is reviewed using:
+### 4. Review the plan
 
 ```bash
 terraform plan
 ```
 
-The plan shows what Terraform intends to:
+Shows the changes Terraform proposes to make before they are applied.
 
-* Create
-* Change
-* Destroy
+Review the plan carefully, especially when it proposes replacing or deleting resources.
 
-This provides an opportunity to review infrastructure changes before they are applied.
-
-The current configuration was validated with:
-
-```text
-No changes. Your infrastructure matches the configuration.
-```
-
-This confirms that the deployed AWS resources currently match the Terraform configuration.
-
----
-
-## Terraform Apply
-
-Infrastructure changes are deployed using:
+### 5. Apply changes
 
 ```bash
 terraform apply
 ```
 
-Terraform displays the proposed changes before applying them.
+Applies the reviewed infrastructure changes after confirmation.
 
-For the security group implementation, Terraform reported:
+### 6. Verify
 
-```text
-Apply complete! Resources: 3 added, 0 changed, 0 destroyed.
-```
+Verify the resulting infrastructure using the AWS Console, AWS CLI, application endpoint, health check, or other appropriate checks.
 
-The three security groups created were:
+The verification method depends on the resource being changed.
 
-```text
-aws_security_group.alb
-aws_security_group.app
-aws_security_group.db
-```
+## Dependency Management
 
----
+Terraform determines resource creation order from references between resources.
 
-## Terraform State
+For example, subnet resources reference the VPC ID. Terraform can therefore determine that the VPC must exist before those subnets are created.
 
-Terraform maintains a state file to track the relationship between the configuration and the real AWS infrastructure.
+The configuration is split into multiple files for readability, but the files are evaluated together as one Terraform configuration.
 
-The local state files are:
+## Provider Lock File
+
+The file `.terraform.lock.hcl` records the selected provider versions and package checksums.
+
+Commit this file to Git so that subsequent Terraform initialization can use the recorded provider selections consistently.
+
+The lock file does not lock the AWS infrastructure itself.
+
+## Terraform State and Git
+
+Terraform state records the relationship between Terraform configuration and the infrastructure managed by Terraform.
+
+Local state files can include:
 
 ```text
 terraform.tfstate
 terraform.tfstate.backup
 ```
 
-These files are intentionally excluded from Git using:
+These files should not be committed to a public Git repository. The Terraform `.gitignore` excludes generated files and other files that should remain local.
 
-```text
-.gitignore
-```
+The repository tracks the Terraform configuration and provider lock file rather than local generated state.
 
-Terraform state can contain infrastructure information that should not be committed to a public repository.
+## Infrastructure Design
 
----
+The Terraform configuration defines:
 
-## Terraform State Inspection
+* One VPC using CIDR `10.0.0.0/16`.
+* Six subnets across two Availability Zones.
+* Separate public, application, and database routing.
+* An Internet Gateway and an S3 Gateway VPC Endpoint.
+* Security groups for the ALB, application, and database tiers.
+* A private EC2 application instance.
+* An Application Load Balancer with a target group, listener, and health check.
 
-The resources currently tracked by Terraform can be viewed with:
+The database tier currently consists of networking and a security group. No database instance is included in the implemented scope.
 
-```bash
-terraform state list
-```
+The application configuration uses HTTP port 80 at the ALB and forwards requests to the application on port 8080.
 
-The project currently tracks resources including:
+## Engineering Practices
 
-```text
-aws_vpc.main
-aws_internet_gateway.main
+The project follows these practices:
 
-aws_subnet.public-a
-aws_subnet.public-b
-aws_subnet.app-a
-aws_subnet.app-b
-aws_subnet.db-a
-aws_subnet.db-b
+* Define infrastructure changes in Terraform rather than relying on manual configuration.
+* Format and validate changes before applying them.
+* Review Terraform plans before making changes.
+* Keep the provider lock file under version control.
+* Exclude state files and generated Terraform data from Git.
+* Verify infrastructure behavior after changes.
 
-aws_route_table.public
-aws_route_table.app
-aws_route_table.db
-
-aws_vpc_endpoint.s3
-
-aws_security_group.alb
-aws_security_group.app
-aws_security_group.db
-```
-
-The state is used by Terraform to determine which infrastructure already exists and what changes are required during subsequent plans.
-
----
-
-## Git and Terraform
-
-The Terraform project is version controlled with Git.
-
-The repository tracks:
-
-```text
-*.tf
-.terraform.lock.hcl
-.gitignore
-```
-
-The repository does not track:
-
-```text
-.terraform/
-terraform.tfstate
-terraform.tfstate.backup
-*.tfvars
-```
-
-This prevents generated Terraform data and potentially sensitive configuration values from being committed unnecessarily.
-
----
-
-## Current Terraform Workflow
-
-The current workflow is:
-
-```text
-Edit Terraform
-      |
-      v
-terraform fmt
-      |
-      v
-terraform validate
-      |
-      v
-terraform plan
-      |
-      v
-Review changes
-      |
-      v
-terraform apply
-      |
-      v
-Verify AWS resources
-      |
-      v
-terraform plan
-      |
-      v
-Confirm no unexpected changes
-```
-
-This workflow is used throughout the project instead of making infrastructure changes manually through the AWS Console.
-
----
-
-## Engineering Approach
-
-The project uses Terraform as the source of truth for infrastructure configuration.
-
-AWS Console access is useful for:
-
-* Observing resources
-* Checking AWS service details
-* Troubleshooting
-* Verifying deployment results
-
-However, infrastructure changes should be represented in Terraform whenever possible.
-
-This keeps the project reproducible and demonstrates Infrastructure as Code practices.
+These practices make the configuration easier to review, maintain, and reproduce.

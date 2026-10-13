@@ -2,26 +2,18 @@
 
 ## Decision Context
 
-The project requires a load balancer for a production-style 3-tier web application.
+This project uses an Application Load Balancer (ALB) to provide a public entry point for an HTTP application while keeping the application server in a private subnet.
 
-The expected application traffic is HTTP/HTTPS, with users accessing the application through a public entry point before traffic reaches private application resources.
+The two load-balancing options considered were:
 
-The main AWS load-balancer options considered were:
+* **Application Load Balancer (ALB):** Designed for HTTP and HTTPS traffic.
+* **Network Load Balancer (NLB):** Designed for TCP, UDP, TLS, and other network-layer use cases.
 
-* Application Load Balancer (ALB)
-* Network Load Balancer (NLB)
+## Selected Design: Application Load Balancer
 
----
+An ALB was selected because the application uses HTTP traffic and requires application-level health checks.
 
-## Selected Design
-
-The target architecture uses an:
-
-```text
-Application Load Balancer (ALB)
-```
-
-The intended traffic flow is:
+### Implemented Traffic Flow
 
 ```text
 Internet
@@ -30,173 +22,84 @@ Internet
    v
 Application Load Balancer
    |
-   | Application : 8080
+   | HTTP : 8080
    v
-Private Application Tier
+Private EC2 Application Server
 ```
 
-The ALB is intended to be placed in the public subnets, while application resources remain in the private application subnets.
+The ALB is deployed in the public subnets. The EC2 application server runs in a private application subnet without a public IP address.
 
----
+The ALB forwards requests to a target group configured for port 8080. The health check uses the `/health` endpoint.
 
 ## Why ALB Fits This Application
 
-The project represents a conventional HTTP/HTTPS application.
+The ALB supports the requirements of this HTTP-based application:
 
-An ALB operates at the application layer and provides features designed for HTTP/HTTPS workloads.
-
-These include:
-
-* HTTP/HTTPS listeners
-* Host-based routing
-* Path-based routing
+* HTTP and HTTPS listeners
+* Host-based and path-based routing
 * Target groups
 * Application-level health checks
-* Integration with services such as Amazon EC2 and containers
+* Integration with Amazon EC2 and container workloads
 
-For this project, the application traffic is HTTP-based, so these capabilities align with the workload.
+The current implementation uses an HTTP listener on port 80 and forwards traffic to the application on port 8080.
 
----
+**HTTPS is not currently configured.**
 
-## Why NLB Was Not Selected as the Primary Load Balancer
+## Why NLB Was Not Selected
 
-A Network Load Balancer operates at the network/transport layer and is designed for high-performance TCP, UDP, and TLS traffic.
+An NLB would be appropriate if the workload required capabilities such as TCP or UDP load balancing, static IP addresses, or network-layer performance characteristics.
 
-NLB is useful when the application requires characteristics such as:
+Those requirements are not part of the current application implementation. An NLB would add complexity without addressing a demonstrated requirement.
 
-* TCP or UDP load balancing
-* Very high connection rates
-* Low network-level latency
-* Static IP addresses
-* Protocols that are not HTTP/HTTPS
+ALB and NLB can also be used together when an architecture has distinct application-layer and network-layer traffic requirements. That is unnecessary for this project.
 
-Those requirements are not part of the current application design.
+## Security Group Design
 
-Therefore, introducing an NLB would add another component without solving a requirement in the current architecture.
-
----
-
-## ALB and NLB Can Be Used Together
-
-ALB and NLB are not mutually exclusive.
-
-A production architecture can use both when there is a specific requirement for both application-layer and network-layer load balancing.
-
-For example, different workloads may require different traffic handling:
-
-```text
-HTTP/HTTPS Workload
-        |
-        v
-       ALB
-        |
-        v
-Application Services
-```
-
-and:
-
-```text
-TCP/UDP Workload
-        |
-        v
-       NLB
-        |
-        v
-Network Services
-```
-
-However, using both simply because both are available would increase architectural complexity and cost.
-
-The design should be driven by application and networking requirements.
-
----
-
-## Port Design
-
-The selected application traffic model is:
+The implemented traffic rules follow this model:
 
 ```text
 Internet
    |
-   | TCP 80
-   v
-ALB
-   |
-   | TCP 8080
-   v
-Application
-   |
-   | TCP 5432
-   v
-PostgreSQL Database
-```
-
-Port 80 is used for the public HTTP listener.
-
-Port 8080 represents the internal application listener.
-
-Port 5432 is the standard PostgreSQL port.
-
-The port numbers are part of the communication contract between the components. They are not properties of the subnets themselves.
-
----
-
-## Security Group Relationship
-
-The load-balancer decision also affects the security model.
-
-The intended security-group relationship is:
-
-```text
-Internet
-   |
-   | TCP 80
+   | HTTP : 80
    v
 ALB Security Group
    |
-   | TCP 8080
+   | Application : 8080
    v
 Application Security Group
-   |
-   | TCP 5432
-   v
-Database Security Group
 ```
 
-This means the application tier does not need to accept direct HTTP traffic from the Internet.
+The application security group allows application traffic from the ALB security group rather than permitting direct public access to the application port.
 
-Only traffic originating from the ALB security group is permitted on the application port.
+A database security group is also defined for the database tier. However, an actual database instance and application-to-database connection have not been implemented.
 
----
+## Validation
 
-## Design Principle
+The implementation was validated by:
 
-The decision follows a simple engineering principle:
+* Accessing the application through the ALB.
+* Receiving a successful HTTP response from the application.
+* Checking the application's `/health` endpoint.
+* Confirming that the ALB target health was healthy.
 
-> Choose the simplest AWS component that satisfies the actual workload requirements.
+These checks validate the implemented HTTP traffic path. They do not establish production-level high availability or database functionality.
 
-For this project:
+## Current Project Scope
 
-```text
-HTTP/HTTPS web application
-        +
-Application-layer routing
-        +
-Application health checks
-        |
-        v
-       ALB
-```
+| Component                      | Status          |
+| ------------------------------ | --------------- |
+| Application Load Balancer      | Implemented     |
+| HTTP listener on port 80       | Implemented     |
+| Target group on port 8080      | Implemented     |
+| Private EC2 application server | Implemented     |
+| `/health` health check         | Implemented     |
+| Network Load Balancer          | Not required    |
+| HTTPS listener                 | Not configured  |
+| Database instance              | Not deployed    |
+| Auto Scaling Group             | Not implemented |
 
-An NLB remains a valid AWS option for workloads requiring network-layer load balancing, but it is not required for the current application design.
+## Engineering Decision
 
----
+Choose the simplest component that meets the workload's actual requirements.
 
-## Current Project Status
-
-The ALB security group has already been created as part of the security foundation.
-
-The Application Load Balancer itself has not yet been provisioned.
-
-When the load balancer is implemented, its configuration and validation results will be documented alongside this decision.
+For this project, an ALB provides the required HTTP entry point, routes requests to the private application server, and checks application health without introducing an unnecessary NLB.

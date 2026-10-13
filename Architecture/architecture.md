@@ -1,575 +1,99 @@
-# Production-Style AWS 3-Tier Infrastructure
+# AWS 3-Tier Infrastructure Architecture
 
-## 1. Architecture Overview
+## Overview
 
-This project implements a production-style, highly available AWS 3-tier architecture using Terraform.
+This project provisions AWS infrastructure using Terraform, with segmented network tiers, controlled traffic flow, and a privately hosted application behind an Application Load Balancer (ALB).
 
-The architecture is designed around:
+**Region:** `us-east-1`
+**Availability Zones:** `us-east-1a`, `us-east-1b`
+**VPC CIDR:** `10.0.0.0/16`
 
-* Multi-AZ deployment
-* Public load-balancing layer
-* Private application layer
-* Private database layer
-* Least-privilege security-group communication
-* Auto Scaling and self-healing
-* Infrastructure as Code
-* Secure AWS service access
-* Centralized monitoring and operational management
-* Cost-conscious portfolio implementation
-
-The environment is deployed in **AWS US East (N. Virginia) — `us-east-1`**.
-
----
-
-## 2. High-Level Architecture
+## Architecture Diagram
 
 ```text
-                              INTERNET
-                                  |
-                                  |
-                         AWS ALB DNS Name
-                                  |
-                                  v
-                    +---------------------------+
-                    |   Application Load        |
-                    |       Balancer            |
-                    |     Public Subnets        |
-                    |       AZ-1 + AZ-2          |
-                    +-------------+-------------+
-                                  |
-                     HTTP :8080 / App Traffic
-                                  |
-                 +----------------+----------------+
-                 |                                 |
-                 v                                 v
-        +-------------------+             +-------------------+
-        |  EC2 Application  |             |  EC2 Application  |
-        |    Instance       |             |    Instance       |
-        |     AZ-1          |             |      AZ-2         |
-        |   Private Subnet  |             |   Private Subnet  |
-        +---------+---------+             +---------+---------+
-                  \                                  /
-                   \                                /
-                    \                              /
-                     +------------+---------------+
-                                  |
-                           PostgreSQL :5432
-                                  |
-                                  v
-                    +---------------------------+
-                    |       Amazon RDS           |
-                    |      PostgreSQL            |
-                    |       Private Subnets      |
-                    |        AZ-1 + AZ-2         |
-                    +---------------------------+
-
-
-              Supporting AWS Services
-              -----------------------
-
-        +----------------+     +-------------------+
-        | IAM            |     | AWS Systems       |
-        | Roles/Policies |     | Manager (SSM)     |
-        +----------------+     +-------------------+
-
-        +----------------+     +-------------------+
-        | CloudWatch     |     | Secrets Manager   |
-        | Monitoring     |     | DB/Application    |
-        +----------------+     +-------------------+
-
-        +----------------+
-        | S3 VPC         |
-        | Gateway        |
-        | Endpoint       |
-        +----------------+
+                         Internet
+                            |
+                            v
+                Application Load Balancer
+                      Public Subnets
+                            |
+                       HTTP : 80
+                            |
+                            v
+                  Private Application Tier
+                    EC2 | Port 8080
+                            |
+                            v
+                   Private Database Tier
+                   Subnets and Security Group
 ```
 
----
+## Network Design
 
-## 3. Network Architecture
+The VPC contains six subnets across two Availability Zones.
 
-The VPC uses the CIDR:
+| Tier        | Subnet   | CIDR           | Availability Zone |
+| ----------- | -------- | -------------- | ----------------- |
+| Public      | public-a | `10.0.1.0/24`  | us-east-1a        |
+| Public      | public-b | `10.0.2.0/24`  | us-east-1b        |
+| Application | app-a    | `10.0.11.0/24` | us-east-1a        |
+| Application | app-b    | `10.0.12.0/24` | us-east-1b        |
+| Database    | db-a     | `10.0.21.0/24` | us-east-1a        |
+| Database    | db-b     | `10.0.22.0/24` | us-east-1b        |
 
-```text
-10.0.0.0/16
-```
+* An Internet Gateway provides internet connectivity for resources using the public route table.
+* Separate route tables control routing for the public, application, and database tiers.
+* An Amazon S3 Gateway VPC Endpoint provides private connectivity to S3 for supported traffic.
+* The application EC2 instance runs in a private subnet without a public IP address.
 
-It is distributed across two Availability Zones for high availability.
+## Application Traffic Flow
 
-### Public Subnets
+1. A user sends an HTTP request to the Application Load Balancer.
+2. The ALB forwards the request to the application target on port `8080`.
+3. The Python HTTP application processes the request.
+4. The `/health` endpoint returns a health-check response for the ALB.
 
-```text
-Public-A → 10.0.1.0/24 → us-east-1a
-Public-B → 10.0.2.0/24 → us-east-1b
-```
+## Security Design
 
-These subnets contain the internet-facing Application Load Balancer.
+### Application Load Balancer Security Group
 
-They have a default route:
-
-```text
-0.0.0.0/0 → Internet Gateway
-```
-
-### Private Application Subnets
-
-```text
-App-A → 10.0.11.0/24 → us-east-1a
-App-B → 10.0.12.0/24 → us-east-1b
-```
-
-These contain the EC2 application instances managed by an Auto Scaling Group.
-
-They do **not** receive public IP addresses.
-
-### Private Database Subnets
-
-```text
-DB-A → 10.0.21.0/24 → us-east-1a
-DB-B → 10.0.22.0/24 → us-east-1b
-```
-
-These are dedicated to the database tier.
-
-The database is not directly accessible from the internet.
-
----
-
-## 4. Traffic Flow
-
-### Application Request
-
-```text
-User
-  |
-  v
-Internet
-  |
-  v
-Application Load Balancer
-  |
-  | TCP 8080
-  v
-Private EC2 Application Instance
-  |
-  | TCP 5432
-  v
-Private RDS PostgreSQL
-```
-
-The database never receives traffic directly from the internet.
-
-Only the application tier is allowed to communicate with the database tier.
-
----
-
-## 5. Load Balancer Design
-
-The project uses an **Application Load Balancer (ALB)** because the application is HTTP/HTTPS based.
-
-The ALB:
-
-* Is internet-facing
-* Runs across two public subnets
-* Performs health checks
-* Distributes traffic between application instances
-* Provides a single entry point to the application
-* Can terminate TLS/HTTPS in a real production deployment
-
-### Production HTTPS Design
-
-In a real production environment:
-
-```text
-User
-  |
-  | HTTPS :443
-  v
-ALB
-  |
-  | HTTP :8080
-  v
-Application
-```
-
-The ALB would use an **AWS Certificate Manager (ACM)** certificate.
-
-HTTP traffic on port 80 would normally redirect to HTTPS on port 443.
-
----
-
-## 6. Domain and Route 53 Decision
-
-This portfolio environment does **not** require a purchased domain.
-
-AWS provides an automatically generated DNS name for the ALB, which can be used to test the application.
-
-Example:
-
-```text
-aws-3tier-alb-xxxxxxxx.us-east-1.elb.amazonaws.com
-```
-
-In a real production environment, the architecture would normally be:
-
-```text
-User
-  |
-  v
-Route 53
-  |
-  v
-ALB
-  |
-  v
-Application
-```
-
-For HTTPS:
-
-```text
-Route 53
-   |
-   v
-ALB :443
-   |
-   +--> ACM Certificate
-   |
-   v
-Application
-```
-
-Therefore:
-
-* Route 53 is **production knowledge/design**
-* ACM is **production knowledge/design**
-* HTTPS is **production design**
-* A purchased domain is **not required for this portfolio deployment**
-
-This avoids unnecessary project cost while still demonstrating knowledge of the production architecture.
-
----
-
-## 7. Security Group Architecture
-
-Security is implemented using tier-based Security Groups.
-
-### ALB Security Group
-
-Allows:
-
-```text
-Internet → TCP 80
-Internet → TCP 443 (production HTTPS design)
-```
-
-The ALB can communicate with the application tier.
+* Allows inbound HTTP traffic on port `80`.
 
 ### Application Security Group
 
-Allows:
-
-```text
-ALB Security Group → TCP 8080
-```
-
-The application servers do not accept application traffic directly from the internet.
+* Allows inbound TCP traffic on port `8080` from the ALB security group.
 
 ### Database Security Group
 
-Allows:
+* Allows inbound TCP traffic on port `5432` from the application security group.
 
-```text
-Application Security Group → TCP 5432
-```
+These security-group references restrict application and database traffic to the intended source tiers.
 
-The database is therefore isolated from both the internet and the ALB.
+## Terraform Implementation
 
----
+Terraform configurations are separated by responsibility:
 
-## 8. Application Tier
+* VPC and Availability Zones
+* Subnets and route tables
+* Internet Gateway and S3 VPC Endpoint
+* Security groups
+* EC2 application instance
+* Application Load Balancer, listener, target group, and target attachment
+* Variables, outputs, provider configuration, and version constraints
 
-The application tier consists of EC2 instances running in private subnets.
+## Verification
 
-The instances are managed by an **Auto Scaling Group (ASG)** across two Availability Zones.
+The application deployment was verified through:
 
-```text
-                 Auto Scaling Group
-                         |
-             +-----------+-----------+
-             |                       |
-             v                       v
-        EC2 Instance            EC2 Instance
-           AZ-1                     AZ-2
-        Private                  Private
-        Subnet                   Subnet
-```
+* Successful HTTP responses from the application.
+* Successful application access through the ALB.
+* A healthy ALB target status.
+* Successful Terraform formatting, validation, and plan checks.
 
-The ASG provides:
+Screenshots documenting these results are available in the [`screenshots/`](../screenshots/) directory.
 
-* Self-healing
-* Horizontal scaling
-* Multi-AZ availability
-* Automatic replacement of unhealthy instances
+## Implementation Scope
 
-The ALB target group performs application health checks.
+The public, application, and database network tiers are configured. The application tier includes one EC2 instance behind the ALB.
 
-Example:
-
-```text
-/health
-```
-
----
-
-## 9. Database Tier
-
-The database tier uses **Amazon RDS PostgreSQL**.
-
-The database is deployed using dedicated private database subnets across two Availability Zones.
-
-The database:
-
-* Has no public accessibility
-* Accepts connections only from the application Security Group
-* Stores application data separately from compute resources
-* Uses managed database capabilities provided by AWS
-
-For a production deployment, RDS Multi-AZ would provide database high availability.
-
----
-
-## 10. Secrets Management
-
-Database credentials should not be hardcoded in:
-
-* Terraform source code
-* GitHub
-* EC2 user-data
-* Application configuration committed to Git
-
-The production design uses **AWS Secrets Manager** for sensitive credentials.
-
-Conceptually:
-
-```text
-Secrets Manager
-       |
-       v
-Application
-       |
-       v
-RDS PostgreSQL
-```
-
-IAM permissions should allow only the required application components to retrieve the required secret.
-
----
-
-## 11. EC2 Management
-
-The application instances are private and should not require direct public SSH access.
-
-The production-style management approach uses:
-
-**AWS Systems Manager (SSM)**
-
-This allows administrators to:
-
-* Connect to instances
-* Run commands
-* Troubleshoot
-* Manage instances without exposing SSH to the internet
-
-The EC2 instances therefore do not need public IP addresses.
-
----
-
-## 12. AWS Service Connectivity
-
-The application tier already uses an **Amazon S3 Gateway VPC Endpoint**.
-
-This allows private-subnet resources to access S3 without requiring traffic to leave through the public internet.
-
-Current design:
-
-```text
-Private EC2
-    |
-    v
-S3 Gateway VPC Endpoint
-    |
-    v
-Amazon S3
-```
-
-This also demonstrates an important production networking concept:
-
-> Private resources can access selected AWS services through VPC endpoints instead of requiring direct internet connectivity.
-
----
-
-## 13. Monitoring and Operations
-
-The production design includes:
-
-### Amazon CloudWatch
-
-Used for:
-
-* EC2 metrics
-* Application monitoring
-* ALB metrics
-* RDS metrics
-* Logs
-* Alarms
-
-### Health Checks
-
-The ALB monitors application health through:
-
-```text
-/health
-```
-
-If an application instance becomes unhealthy, the load balancer stops sending traffic to it and the Auto Scaling Group can replace it.
-
----
-
-## 14. Web Application Firewall
-
-For a real internet-facing production application, **AWS WAF** can be placed in front of the ALB.
-
-Conceptually:
-
-```text
-Internet
-   |
-   v
-AWS WAF
-   |
-   v
-ALB
-   |
-   v
-Application
-```
-
-WAF can provide protection against common web attacks and allow organizations to define application-layer rules.
-
-WAF is treated as production architecture knowledge in this portfolio environment rather than adding unnecessary cost to the initial deployment.
-
----
-
-## 15. Complete Production Traffic Architecture
-
-```text
-                         INTERNET
-                            |
-                            v
-                    +---------------+
-                    |    Route 53   |
-                    | Production DNS|
-                    +-------+-------+
-                            |
-                            v
-                    +---------------+
-                    |    AWS WAF    |
-                    +-------+-------+
-                            |
-                            v
-              +---------------------------+
-              | Application Load Balancer |
-              |       Public Subnets      |
-              |       AZ-1 + AZ-2         |
-              +-------------+-------------+
-                            |
-                    HTTP :8080
-                            |
-             +--------------+--------------+
-             |                             |
-             v                             v
-      +--------------+              +--------------+
-      | EC2 / ASG    |              | EC2 / ASG    |
-      | Private AZ-1 |              | Private AZ-2 |
-      +------+-------+              +------+-------+
-             |                             |
-             +--------------+--------------+
-                            |
-                       TCP :5432
-                            |
-                            v
-                  +-------------------+
-                  |   Amazon RDS      |
-                  |    PostgreSQL     |
-                  | Private Subnets  |
-                  |     AZ-1 + AZ-2   |
-                  +-------------------+
-
-
-Supporting Services
-────────────────────────────────────────
-
-IAM
-  └── EC2 / ASG permissions
-
-Systems Manager
-  └── Private EC2 administration
-
-Secrets Manager
-  └── Database/application secrets
-
-CloudWatch
-  └── Metrics, logs and alarms
-
-S3 Gateway VPC Endpoint
-  └── Private S3 access
-```
-
----
-
-## 16. Portfolio Implementation vs Production Design
-
-This distinction is intentional.
-
-| Component        | Portfolio Environment          | Production Knowledge |
-| ---------------- | ------------------------------ | -------------------- |
-| VPC              | Implemented                    | Production           |
-| Multi-AZ subnets | Implemented                    | Production           |
-| Internet Gateway | Implemented                    | Production           |
-| ALB              | Implemented/planned            | Production           |
-| EC2              | To be implemented              | Production           |
-| Auto Scaling     | To be implemented              | Production           |
-| RDS PostgreSQL   | To be implemented              | Production           |
-| Security Groups  | Implemented                    | Production           |
-| S3 VPC Endpoint  | Implemented                    | Production           |
-| IAM              | To be implemented              | Production           |
-| Systems Manager  | To be implemented              | Production           |
-| Secrets Manager  | To be implemented              | Production           |
-| CloudWatch       | To be implemented              | Production           |
-| Route 53         | Not required                   | Production knowledge |
-| ACM              | Not required without domain    | Production knowledge |
-| HTTPS            | Production design              | Production           |
-| WAF              | Production knowledge           | Production           |
-| NAT Gateway      | Deliberately avoided initially | Production trade-off |
-
-The project will **never claim that a service was deployed when it was only studied or designed**.
-
----
-
-## 17. Engineering Principle
-
-The goal of this project is not to deploy the maximum number of AWS services.
-
-The goal is to demonstrate the ability to:
-
-1. Design a production-style AWS architecture.
-2. Understand why each component exists.
-3. Implement the appropriate components using Terraform.
-4. Make cost-conscious engineering decisions.
-5. Understand production alternatives.
-6. Document architecture decisions and trade-offs.
-7. Troubleshoot failures systematically.
-8. Explain the architecture confidently in an AWS DevOps interview.
-
-Every significant engineering decision made during implementation will be documented in the repository.
+The database tier currently consists of subnets, routing, and a security group; a database instance has not been deployed. Auto Scaling and additional application instances are not part of the current implementation.

@@ -1,371 +1,189 @@
-# Security Groups
+# AWS Security Groups
 
 ## Overview
 
-Security groups are used to control network traffic to the resources in the 3-tier architecture.
+The Terraform configuration defines three security groups for the three-tier architecture:
 
-The project uses separate security groups for:
-
-* Application Load Balancer
-* Application tier
+* Application Load Balancer (ALB)
+* Application server
 * Database tier
 
-The security model follows a tier-to-tier access pattern:
+Security groups control inbound and outbound traffic associated with AWS resources. The configured inbound rules restrict communication between tiers.
 
-```text id="s5x2pe"
+## Inbound Rules
+
+| Security Group | Protocol | Port | Allowed Source             | Purpose                                             |
+| -------------- | -------- | ---: | -------------------------- | --------------------------------------------------- |
+| ALB            | TCP      |   80 | `0.0.0.0/0`                | Accept HTTP requests                                |
+| Application    | TCP      | 8080 | ALB security group         | Receive application traffic from the ALB            |
+| Database       | TCP      | 5432 | Application security group | Permit PostgreSQL traffic from the application tier |
+
+These rules are defined in `terraform/security-groups.tf`.
+
+## 1. ALB Security Group
+
+**Terraform resource:** `aws_security_group.alb`
+
+### Inbound
+
+* Protocol: TCP
+* Port: 80
+* Source: `0.0.0.0/0`
+
+This permits HTTP traffic from IPv4 internet addresses to reach the ALB, subject to the remaining network configuration.
+
+### Outbound
+
+* Protocol: All
+* Destination: `0.0.0.0/0`
+
+The current configuration allows all outbound traffic.
+
+**Security consideration:** HTTPS is not configured in the current implementation. For a production deployment, configure HTTPS with a valid certificate and consider restricting access according to the application's requirements.
+
+## 2. Application Security Group
+
+**Terraform resource:** `aws_security_group.app`
+
+### Inbound
+
+* Protocol: TCP
+* Port: 8080
+* Source: ALB security group
+
+The application security group references the ALB security group rather than allowing direct inbound connections from the internet.
+
+This supports the intended traffic flow:
+
+```text
 Internet
    |
-   | TCP 80
+   | HTTP : 80
    v
+Application Load Balancer
+   |
+   | HTTP : 8080
+   v
+Private EC2 Application Instance
+```
+
+The application instance does not need a public IP address for the ALB to forward traffic to its private IP address.
+
+### Outbound
+
+* Protocol: All
+* Destination: `0.0.0.0/0`
+
+The current configuration allows all outbound traffic. Actual connectivity depends on the available routes, endpoints, and applicable network controls.
+
+## 3. Database Security Group
+
+**Terraform resource:** `aws_security_group.db`
+
+### Inbound
+
+* Protocol: TCP
+* Port: 5432
+* Source: Application security group
+
+Port 5432 is the default PostgreSQL port.
+
+The rule allows PostgreSQL traffic originating from resources associated with the application security group. It does not expose the database port directly to the internet.
+
+**Current scope:** The database security group is defined in Terraform, but no database instance is deployed. This rule documents the intended future application-to-database access pattern; it does not mean that a working database connection exists.
+
+### Outbound
+
+* Protocol: All
+* Destination: `0.0.0.0/0`
+
+The current configuration allows all outbound traffic.
+
+## Why Reference Other Security Groups?
+
+The application security group references the ALB security group, and the database security group references the application security group.
+
+This approach defines access by security-group membership rather than relying on fixed private IP addresses.
+
+For example:
+
+```text
 ALB Security Group
-   |
-   | TCP 8080
-   v
+       |
+       | TCP 8080
+       v
 Application Security Group
-   |
-   | TCP 5432
-   v
+       |
+       | TCP 5432
+       v
 Database Security Group
 ```
 
----
+The diagram represents the intended three-tier access model. The application-to-database path is configured as a security-group rule, but the database workload itself is not deployed.
 
-## Security Group Design
+## Security Groups and Route Tables
 
-The security groups were intentionally created separately rather than using one security group for all resources.
+These AWS networking components have different responsibilities.
 
-This provides a security boundary between each tier.
+| Component      | Responsibility                                                           |
+| -------------- | ------------------------------------------------------------------------ |
+| Route table    | Determines the network path for traffic                                  |
+| Security group | Controls permitted inbound and outbound traffic for associated resources |
 
-### Traffic Model
+A valid route does not override a security-group restriction. Likewise, a security-group rule does not create a network route.
 
-| Source      | Destination | Port | Protocol |
-| ----------- | ----------- | ---: | -------- |
-| Internet    | ALB         |   80 | TCP      |
-| ALB         | Application | 8080 | TCP      |
-| Application | Database    | 5432 | TCP      |
-
----
-
-## ALB Security Group
-
-Terraform resource:
-
-```text id="c4m2w9"
-aws_security_group.alb
-```
-
-Purpose:
-
-Allow public HTTP traffic to reach the Application Load Balancer.
-
-### Inbound Rule
-
-```text id="v9t5pj"
-Protocol: TCP
-Port: 80
-Source: 0.0.0.0/0
-```
-
-This allows HTTP traffic from the Internet to the load balancer.
-
-The load balancer is the public entry point of the application architecture.
-
-### Outbound Rule
-
-The current implementation allows outbound traffic:
-
-```text id="u0m8sc"
-All protocols
-Destination: 0.0.0.0/0
-```
-
-This keeps the initial lab configuration simple while the application path is being established.
-
----
-
-## Application Security Group
-
-Terraform resource:
-
-```text id="j6q2dx"
-aws_security_group.app
-```
-
-Purpose:
-
-Allow application traffic only from the Application Load Balancer.
-
-### Inbound Rule
-
-```text id="fxs0jp"
-Protocol: TCP
-Port: 8080
-Source: ALB Security Group
-```
-
-The source is the ALB security group rather than the public Internet.
-
-This means application resources should not accept direct Internet traffic on port 8080.
-
-The intended traffic path is:
-
-```text id="5w8o2m"
-Internet
-   |
-   v
-ALB
-   |
-   v
-Application
-```
-
-rather than:
-
-```text id="fj3g1t"
-Internet
-   |
-   X
-Application
-```
-
-### Outbound Rule
-
-The current implementation allows outbound traffic:
-
-```text id="n7c0qk"
-All protocols
-Destination: 0.0.0.0/0
-```
-
----
-
-## Database Security Group
-
-Terraform resource:
-
-```text id="z7y4ax"
-aws_security_group.db
-```
-
-Purpose:
-
-Allow PostgreSQL traffic only from the application tier.
-
-### Inbound Rule
-
-```text id="7w2r8n"
-Protocol: TCP
-Port: 5432
-Source: Application Security Group
-```
-
-The database does not allow PostgreSQL access directly from the Internet.
-
-The intended traffic path is:
-
-```text id="5z7m3c"
-Application
-    |
-    | TCP 5432
-    v
-Database
-```
-
-### Outbound Rule
-
-The current implementation allows outbound traffic:
-
-```text id="2z9g4k"
-All protocols
-Destination: 0.0.0.0/0
-```
-
----
-
-## Why Security Groups Reference Other Security Groups
-
-The application security group allows traffic from the ALB security group:
-
-```text id="h4m8wv"
-ALB Security Group → Application Security Group
-```
-
-The database security group allows traffic from the application security group:
-
-```text id="y1s6qe"
-Application Security Group → Database Security Group
-```
-
-This is preferable to allowing large IP ranges between tiers because the access relationship follows the application architecture.
-
-If application instances change their private IP addresses, the security relationship does not need to be manually updated.
-
----
-
-## Security Groups vs Route Tables
-
-Security groups and route tables perform different functions.
-
-### Route Tables
-
-Route tables determine the network path.
-
-For example:
-
-```text id="f5k8ne"
-0.0.0.0/0
-      |
-      v
-Internet Gateway
-```
-
-This establishes a possible path to the Internet.
-
-### Security Groups
-
-Security groups determine whether traffic is allowed to reach the resource.
-
-For example:
-
-```text id="n0h6cs"
-TCP 8080
-Source: ALB Security Group
-```
-
-This controls which traffic can reach the application.
-
-Therefore, a working network path requires both:
-
-```text id="x9m3dy"
-Routing
-   +
-Security Rules
-   =
-Allowed Communication
-```
-
----
+Successful communication requires an appropriate network path and rules that permit the traffic.
 
 ## Security Groups Are Stateful
 
 AWS security groups are stateful.
 
-When an allowed inbound connection is established, the response traffic is automatically allowed back to the originating source.
+When traffic is permitted in one direction and a connection is established, response traffic for that connection is automatically permitted. A separate inbound rule is not needed solely to allow the response.
 
-For example:
+## Outbound Access and Least Privilege
 
-```text id="8b7t4s"
-ALB
- |
- | TCP 8080 request
- v
-Application
- |
- | response
- v
-ALB
+All three security groups currently allow all outbound traffic to `0.0.0.0/0`.
+
+This is a broad outbound rule rather than a strict least-privilege design.
+
+For a production deployment, review outbound requirements and restrict traffic where practical. Changes should account for application dependencies, health checks, AWS service access, and operational requirements.
+
+## Validation
+
+Terraform configuration can be checked using:
+
+```bash
+terraform fmt
+terraform validate
+terraform plan
 ```
 
-A separate inbound rule for the response traffic is not required.
+These commands format the configuration, validate its structure, and preview proposed infrastructure changes.
 
----
+They do not independently prove that live network traffic works.
 
-## Port Design
+For runtime verification, check the relevant AWS security-group rules and resource associations. For the implemented application path, verify that:
 
-The project uses:
+* The ALB accepts HTTP traffic on port 80.
+* The application security group permits TCP port 8080 from the ALB security group.
+* The application is listening on port 8080.
+* The ALB target health check succeeds.
 
-```text id="s4t2rc"
-TCP 80    → HTTP traffic to ALB
-TCP 8080  → Application traffic
-TCP 5432  → PostgreSQL database traffic
-```
+The database rule can be reviewed in Terraform and AWS, but database connectivity cannot be tested until a database instance is implemented.
 
-These ports represent the communication contracts between the tiers.
+## Current Configuration Summary
 
-Port numbers are not assigned to subnets.
+| Component                  | Configuration                                     |
+| -------------------------- | ------------------------------------------------- |
+| ALB security group         | Inbound TCP 80 from `0.0.0.0/0`                   |
+| Application security group | Inbound TCP 8080 from ALB security group          |
+| Database security group    | Inbound TCP 5432 from application security group  |
+| Outbound rules             | All outbound traffic allowed for all three groups |
+| HTTPS                      | Not configured                                    |
+| Database instance          | Not deployed                                      |
 
-Instead:
+## Key Learning
 
-* Applications listen on ports.
-* Security groups control access to those ports.
-* Route tables determine network paths.
+Security groups should permit only the traffic required by each tier.
 
-For example, an application may listen on port 8080, while the subnet simply provides the IP address range in which the application resource exists.
-
----
-
-## Current Security Implementation
-
-The following security groups have been created and verified:
-
-```text id="z8h3xk"
-aws_security_group.alb
-aws_security_group.app
-aws_security_group.db
-```
-
-Terraform reported:
-
-```text id="g1m4pj"
-Apply complete! Resources: 3 added, 0 changed, 0 destroyed.
-```
-
-A subsequent Terraform plan returned:
-
-```text id="3n8d6v"
-No changes. Your infrastructure matches the configuration.
-```
-
-This confirms that the deployed security groups currently match the Terraform configuration.
-
----
-
-## Current Security Model
-
-The current model can be summarized as:
-
-```text id="p7f4ky"
-                    INTERNET
-                       |
-                    TCP 80
-                       |
-                       v
-               ┌──────────────┐
-               │     ALB      │
-               │    SG-ALB    │
-               └──────┬───────┘
-                      |
-                   TCP 8080
-                      |
-                      v
-               ┌──────────────┐
-               │ APPLICATION  │
-               │    SG-APP    │
-               └──────┬───────┘
-                      |
-                   TCP 5432
-                      |
-                      v
-               ┌──────────────┐
-               │   DATABASE   │
-               │    SG-DB     │
-               └──────────────┘
-```
-
-This creates a controlled communication path between the tiers rather than allowing unrestricted access between them.
-
----
-
-## Security Considerations
-
-The current implementation uses open outbound rules for simplicity:
-
-```text
-0.0.0.0/0
-```
-
-This is acceptable for the current learning environment but is not a strict least-privilege outbound design.
-
-The inbound rules are more restrictive because access between tiers is explicitly limited to the required source security group and port.
-
-Security hardening should b
+Referencing another security group provides a maintainable way to express tier-to-tier access. However, secure communication also depends on routing, resource configuration, and the availability of the destination service.

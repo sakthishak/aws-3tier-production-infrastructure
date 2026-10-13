@@ -1,335 +1,212 @@
-# Networking Infrastructure
+# AWS Networking Infrastructure
 
 ## Overview
 
-The networking foundation of the AWS 3-tier infrastructure was built using Terraform.
+The project uses an Amazon Virtual Private Cloud (VPC) with separate public, application, and database subnets. Terraform defines the network resources and routing configuration.
 
-The goal was to create a network that separates public, application, and database workloads while controlling how traffic moves between them.
+## VPC Configuration
 
----
-
-## VPC
-
-A single Amazon Virtual Private Cloud (VPC) was created:
-
-```text
-CIDR: 10.0.0.0/16
-```
-
-The VPC has:
-
-* DNS support enabled
-* DNS hostnames enabled
-
-Terraform resource:
-
-```text
-aws_vpc.main
-```
-
----
-
-## Availability Zones
-
-Two Availability Zones are used:
-
-```text
-us-east-1a
-us-east-1b
-```
-
-Using two Availability Zones allows the infrastructure to distribute resources across separate Availability Zone failure domains.
-
-Terraform obtains the available Availability Zones dynamically using:
-
-```text
-data.aws_availability_zones.available
-```
-
----
+| Setting            | Value                      |
+| ------------------ | -------------------------- |
+| VPC CIDR           | `10.0.0.0/16`              |
+| AWS Region         | `us-east-1`                |
+| Availability Zones | `us-east-1a`, `us-east-1b` |
+| DNS support        | Enabled                    |
+| DNS hostnames      | Enabled                    |
 
 ## Subnet Design
 
-Six subnets were created.
+Six subnets divide the network into three tiers.
 
-### Public Subnets
+| Subnet   | Availability Zone | CIDR           | Purpose                 |
+| -------- | ----------------- | -------------- | ----------------------- |
+| public-a | us-east-1a        | `10.0.1.0/24`  | Public-facing resources |
+| public-b | us-east-1b        | `10.0.2.0/24`  | Public-facing resources |
+| app-a    | us-east-1a        | `10.0.11.0/24` | Application workloads   |
+| app-b    | us-east-1b        | `10.0.12.0/24` | Application workloads   |
+| db-a     | us-east-1a        | `10.0.21.0/24` | Database workloads      |
+| db-b     | us-east-1b        | `10.0.22.0/24` | Database workloads      |
 
-| Subnet   | Availability Zone | CIDR        |
-| -------- | ----------------- | ----------- |
-| public-a | us-east-1a        | 10.0.1.0/24 |
-| public-b | us-east-1b        | 10.0.2.0/24 |
+The public subnets enable automatic public IPv4 address assignment. The application and database subnets do not.
 
-These subnets are intended for resources that require public-facing connectivity, such as the Application Load Balancer.
-
-Public IP address assignment is enabled for these subnets.
-
----
-
-### Private Application Subnets
-
-| Subnet | Availability Zone | CIDR         |
-| ------ | ----------------- | ------------ |
-| app-a  | us-east-1a        | 10.0.11.0/24 |
-| app-b  | us-east-1b        | 10.0.12.0/24 |
-
-These subnets are intended for application workloads.
-
-Automatic public IP assignment is disabled.
-
----
-
-### Private Database Subnets
-
-| Subnet | Availability Zone | CIDR         |
-| ------ | ----------------- | ------------ |
-| db-a   | us-east-1a        | 10.0.21.0/24 |
-| db-b   | us-east-1b        | 10.0.22.0/24 |
-
-These subnets are intended for database workloads.
-
-Automatic public IP assignment is disabled.
-
----
+The subnet layout provides separation between tiers and prepares the network for workloads distributed across two Availability Zones. It does not, by itself, guarantee high availability.
 
 ## Internet Gateway
 
-An Internet Gateway was created and attached to the VPC.
+An Internet Gateway is attached to the VPC.
 
-Terraform resource:
+The public route table contains this route:
 
 ```text
-aws_internet_gateway.main
+Destination: 0.0.0.0/0
+Target:      Internet Gateway
 ```
 
-The Internet Gateway provides the path between the VPC and the public Internet for resources whose subnet route table permits that traffic.
+Both public subnets are associated with the public route table.
 
----
+An Internet Gateway route alone does not make a resource publicly accessible. Appropriate subnet configuration, public addressing where required, security-group rules, and network paths must also be in place.
 
 ## Route Tables
 
-Separate route tables were created for the public, application, and database tiers.
+Separate route tables are defined for the public, application, and database tiers.
 
 ### Public Route Table
 
-Terraform resource:
+Associated subnets:
 
-```text
-aws_route_table.public
-```
+* `public-a`
+* `public-b`
 
-The public route table contains:
-
-```text
-0.0.0.0/0 → Internet Gateway
-```
-
-It is associated with:
-
-```text
-public-a
-public-b
-```
-
-This makes the public subnets internet-routable.
-
----
+The default route sends internet-bound IPv4 traffic to the Internet Gateway.
 
 ### Application Route Table
 
-Terraform resource:
+Associated subnets:
 
-```text
-aws_route_table.app
-```
+* `app-a`
+* `app-b`
 
-It is associated with:
+The application route table does not contain a default route to the Internet Gateway or a NAT Gateway.
 
-```text
-app-a
-app-b
-```
+It uses an Amazon S3 Gateway VPC Endpoint route for private connectivity to S3.
 
-The application route table does not contain a direct Internet Gateway route.
-
-An S3 Gateway VPC Endpoint route has been added so application resources can access Amazon Simple Storage Service (S3) through the AWS network without requiring a NAT Gateway.
-
----
+**Important:** This does not provide general internet access to application instances.
 
 ### Database Route Table
 
-Terraform resource:
+Associated subnets:
 
-```text
-aws_route_table.db
-```
+* `db-a`
+* `db-b`
 
-It is associated with:
+The database route table contains the local VPC route. It does not have a default route to the Internet Gateway or a NAT Gateway.
 
-```text
-db-a
-db-b
-```
-
-The database route table currently contains only the local VPC route.
-
-This keeps the database tier isolated from direct Internet routing.
-
----
+No database instance is included in the current implementation.
 
 ## S3 Gateway VPC Endpoint
 
-An S3 Gateway VPC Endpoint was created:
+The project defines an S3 Gateway VPC Endpoint for the `us-east-1` region.
 
 ```text
-aws_vpc_endpoint.s3
-```
-
-Service:
-
-```text
-com.amazonaws.us-east-1.s3
-```
-
-Endpoint type:
-
-```text
-Gateway
+Service: com.amazonaws.us-east-1.s3
+Type:    Gateway
 ```
 
 The endpoint is associated with the application route table.
 
-### Why we used an S3 Gateway Endpoint
+### Why use it?
 
-The application tier may need access to S3, for example for:
+An S3 Gateway VPC Endpoint allows eligible traffic from associated subnets to reach Amazon Simple Storage Service (S3) without requiring a NAT Gateway or an internet-facing route.
 
-* Application files
-* Backups
-* Logs
-* Static assets
+Potential use cases include accessing application files, logs, backups, and static assets stored in S3.
 
-A Gateway VPC Endpoint provides private connectivity to S3 without requiring Internet Gateway or NAT Gateway connectivity.
+Actual access also depends on the endpoint policy, identity permissions, bucket policy, and other applicable controls.
 
-It also avoids the hourly and data-processing costs associated with a NAT Gateway.
-
----
+A Gateway Endpoint does not provide connectivity to other AWS services.
 
 ## NAT Gateway Decision
 
-A NAT Gateway was intentionally not created during the initial networking implementation.
+A NAT Gateway is not included in the current network configuration.
 
-The application subnets are private, but the current project does not yet require general outbound Internet access from those subnets.
+This avoids the recurring cost of NAT Gateway resources while keeping the initial infrastructure focused on the required application traffic path.
 
-For the current implementation, S3 access can be handled through the S3 Gateway VPC Endpoint.
+If private instances later require general outbound internet access, a NAT Gateway and suitable route-table entries can be added.
 
-This avoids introducing an additional recurring AWS cost while the infrastructure is being developed.
+Alternatively, specific AWS services can be accessed privately through appropriate VPC endpoints where supported.
 
-The decision can be revisited if the application later requires outbound Internet access from private subnets.
+The correct choice depends on the application's connectivity requirements and cost constraints.
 
----
+## Private EC2 and Systems Manager Connectivity
+
+The application EC2 instance is designed to run in a private subnet without a public IP address.
+
+The instance's IAM role includes the `AmazonSSMManagedInstanceCore` policy. However, IAM permissions alone do not establish network connectivity to AWS Systems Manager.
+
+For Systems Manager Session Manager to work from a private subnet, the instance must be able to reach the required Systems Manager service endpoints. This can be achieved through suitable VPC interface endpoints or an appropriate outbound network path, such as a NAT Gateway.
+
+The S3 Gateway Endpoint does not replace these Systems Manager connectivity requirements.
+
+This is an important verification point when operating private EC2 instances.
 
 ## Network Traffic Model
 
-The current network design separates routing from traffic authorization.
+Routing and traffic authorization perform different jobs.
 
 ### Routing
 
-Route tables determine where network traffic can go.
+Route tables determine the network path a packet can take.
 
 ```text
 Public Subnet
-     |
-     v
+      |
+      v
 Public Route Table
-     |
-     v
+      |
+      v
 Internet Gateway
+      |
+      v
+Internet
 ```
 
-Private application and database subnets do not receive a direct Internet Gateway route.
+### Security Groups
 
-### Security
+Security groups control which inbound and outbound traffic is permitted for associated resources.
 
-Security groups determine whether traffic is allowed to reach resources.
+For the application traffic path:
 
-Therefore:
+```text
+Internet
+    |
+    | HTTP : 80
+    v
+Application Load Balancer
+    |
+    | HTTP : 8080
+    v
+Private EC2 Application Instance
+```
 
-* Route tables control the network path.
-* Security groups control allowed traffic.
-* Both must allow the intended communication for traffic to succeed.
+The application security group restricts application traffic to the ALB security group.
 
----
+Both routing and security rules must permit the intended communication for traffic to succeed.
 
-## Validation
+## Validation Approach
 
-Terraform validation was performed after implementing the networking resources.
+Validate networking changes using Terraform and AWS service checks.
 
-The following command returned no pending changes:
+### Terraform checks
 
 ```bash
+terraform fmt
+terraform validate
 terraform plan
 ```
 
-Result:
+* `terraform fmt` formats Terraform configuration files.
+* `terraform validate` checks the configuration's syntax and structure.
+* `terraform plan` previews proposed infrastructure changes.
 
-```text
-No changes. Your infrastructure matches the configuration.
-```
+### AWS checks
 
-The Terraform state also contains the implemented networking resources, including:
+Use the AWS Console or AWS Command Line Interface (CLI) to verify:
 
-```text
-aws_vpc.main
-aws_internet_gateway.main
+* VPC and subnet CIDR blocks.
+* Subnet Availability Zone assignments.
+* Route-table associations and routes.
+* Internet Gateway attachment.
+* S3 Gateway Endpoint association.
+* Security-group rules.
+* Application Load Balancer connectivity to the private EC2 instance.
 
-aws_subnet.public-a
-aws_subnet.public-b
-aws_subnet.app-a
-aws_subnet.app-b
-aws_subnet.db-a
-aws_subnet.db-b
-
-aws_route_table.public
-aws_route_table.app
-aws_route_table.db
-
-aws_route_table_association.public_a
-aws_route_table_association.public_b
-aws_route_table_association.app_a
-aws_route_table_association.app_b
-aws_route_table_association.db_a
-aws_route_table_association.db_b
-
-aws_vpc_endpoint.s3
-```
-
----
+A successful Terraform validation does not prove that application traffic or private service connectivity works. Those require appropriate runtime checks.
 
 ## Key Learning
 
-The networking design demonstrates the difference between:
+A reliable networking troubleshooting process separates three questions:
 
-```text
-VPC
- ↓
-Subnets
- ↓
-Route Tables
- ↓
-Network Paths
-```
+1. **Routing:** Is there a valid network path to the destination?
+2. **Authorization:** Do security groups and other applicable policies permit the traffic?
+3. **Service connectivity:** Is the destination service reachable and configured to respond?
 
-and:
-
-```text
-Security Groups
- ↓
-Allowed Traffic
- ↓
-Resource Access
-```
-
-A subnet does not have a port.
-
-Applications listen on ports, while security groups control access to those ports.
-
-This distinction is important when troubleshooting AWS networking problems.
+A subnet does not have a port. Applications listen on ports, while security groups and other network controls determine whether traffic can reach them.
