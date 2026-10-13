@@ -5,8 +5,36 @@ Designed and deployed AWS infrastructure using Terraform, implementing network s
 **Tech Stack:** AWS · Terraform · VPC · EC2 · Application Load Balancer · IAM · Security Groups · S3 Gateway Endpoint
 
 ## Architecture
+# AWS 3-Tier Production Infrastructure | Terraform
+
+Designed and deployed AWS infrastructure using Terraform, implementing network segmentation, security-group boundaries, private application hosting, and an Application Load Balancer.
+
+**Tech Stack:** AWS · Terraform · VPC · EC2 · Application Load Balancer · IAM · Security Groups · S3 Gateway Endpoint
+
+## Architecture
 
 ```text
+                         Internet
+                            |
+                            v
+                  Application Load Balancer
+                       Public Subnets
+                            |
+                      HTTP : 80
+                            |
+                            v
+                   Private Application Tier
+                     EC2 | Port 8080
+                            |
+                            v
+                    Private Database Tier
+                   Subnets & Security Group
+```
+
+**AWS Region:** `us-east-1`
+**Availability Zones:** `us-east-1a`, `us-east-1b`
+
+## Implementation Highlights
                          Internet
                             |
                             v
@@ -31,6 +59,10 @@ Designed and deployed AWS infrastructure using Terraform, implementing network s
 
 ### Networking
 
+* Created a Virtual Private Cloud (VPC) with CIDR `10.0.0.0/16`.
+* Designed six subnets across two Availability Zones: two public, two private application, and two private database subnets.
+* Configured an Internet Gateway, separate route tables, and subnet associations.
+* Implemented an S3 Gateway VPC Endpoint for private connectivity to Amazon S3 without requiring a NAT Gateway for that traffic.
 * Created a Virtual Private Cloud (VPC) with CIDR `10.0.0.0/16`.
 * Designed six subnets across two Availability Zones: two public, two private application, and two private database subnets.
 * Configured an Internet Gateway, separate route tables, and subnet associations.
@@ -90,6 +122,14 @@ The deployed application was verified through:
 ## Project Scope
 
 The database tier includes private subnets and a database security group. A database instance has not been deployed.
+* **Application Load Balancer:** Selected for HTTP application traffic routing and health checks.
+* **Private application hosting:** Kept the application instance out of direct public internet access.
+* **Security-group references:** Used tier-specific rules to restrict traffic between components.
+* **S3 Gateway Endpoint:** Enabled private S3 connectivity without adding a NAT Gateway solely for S3 access.
+
+## Project Scope
+
+The database tier includes private subnets and a database security group. A database instance has not been deployed.
 
 ## Repository Structure
 
@@ -98,8 +138,25 @@ aws-3tier-production-infrastructure/
 ├── Architecture/
 ├── Engineering-Decisions/
 ├── Infrastructure/
+├── Infrastructure/
 ├── screenshots/
 └── terraform/
+```
+
+## Tools
+
+* **Cloud:** Amazon Web Services (AWS)
+* **Infrastructure as Code:** Terraform
+* **Compute:** Amazon EC2
+* **Networking:** Amazon VPC, subnets, route tables, Internet Gateway
+* **Load Balancing:** Application Load Balancer
+* **Security:** IAM, security groups, AWS Systems Manager
+* **Version Control:** Git and GitHub
+
+---
+
+**Author:** [Sakthisha K.](https://github.com/sakthishak)
+**Repository:** [aws-3tier-production-infrastructure](https://github.com/sakthishak/aws-3tier-production-infrastructure)
 ```
 
 ## Tools
