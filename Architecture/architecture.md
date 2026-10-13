@@ -26,6 +26,7 @@ This project provisions AWS infrastructure using Terraform, with segmented netwo
                             v
                    Private Database Tier
                    Subnets and Security Group
+                   No database instance
 ```
 
 ## Network Design
