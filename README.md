@@ -7,22 +7,24 @@ Designed and deployed AWS infrastructure using Terraform, implementing network s
 ## Architecture
 
 ```text
-                         Internet
+                                                Internet
                             |
                             v
-                  Application Load Balancer
+                 Application Load Balancer
                        Public Subnets
                             |
-                      HTTP : 80
+                        HTTP : 80
                             |
                             v
-                   Private Application Tier
-                     EC2 | Port 8080
+                  Private Application Tier
+                    EC2 | Port 8080
                             |
+                            | Database connectivity
+                            | Not implemented
                             v
-                    Private Database Tier
-                   Subnets & Security Group
-```
+                   Private Database Tier
+                   Subnets + Security Group
+                   No database instance
 
 **AWS Region:** `us-east-1`
 **Availability Zones:** `us-east-1a`, `us-east-1b`
@@ -72,6 +74,22 @@ The deployed application was verified through:
 
 ![Application Browser](screenshots/02-application-browser.png)
 
+## Deployment Status
+
+The infrastructure was successfully provisioned using Terraform.
+
+During the deployment, the application was accessed through the
+Application Load Balancer, HTTP responses were verified, and the
+target group's health check reported a healthy application target.
+
+After completing the validation, the Terraform-managed AWS resources
+were destroyed to avoid ongoing infrastructure costs.
+
+The Terraform configuration, documentation, and deployment evidence
+remain available in this repository.
+
+The infrastructure is not currently deployed.
+
 **HTTP response verification**
 
 ![Application HTTP Response](screenshots/03-application-curl-success.png)
@@ -89,7 +107,25 @@ The deployed application was verified through:
 
 ## Project Scope
 
-The database tier includes private subnets and a database security group. A database instance has not been deployed.
+### Implemented and Verified
+- VPC and six subnets across two Availability Zones.
+- Internet Gateway and separate route tables.
+- S3 Gateway VPC Endpoint.
+- Security groups for the ALB, application, and database tiers.
+- Private EC2 application instance.
+- Application Load Balancer with an HTTP listener.
+- Target group and application health check.
+- Terraform-based infrastructure provisioning.
+- Application access and HTTP response verification.
+
+### Not Implemented
+- Database instance and application-to-database integration.
+- Application Auto Scaling or multiple application instances.
+- HTTPS listener and TLS certificate.
+- NAT Gateway.
+
+The database tier represents the network and security foundation
+for a future database deployment. It is not a running database.
 
 ## Repository Structure
 
